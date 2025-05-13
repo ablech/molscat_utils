@@ -1,0 +1,11 @@
+[project]
+name = "pymolscat"
+version = "0.0.1"
+description = "Python package for wrapping MOLSCAT and processing its output"
+authors = [
+    { name = "Alexander Blech", email = "alexander.blech@fu-berlin.de"},
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
