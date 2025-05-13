@@ -5,7 +5,14 @@ description = "Python package for wrapping MOLSCAT and processing its output"
 authors = [
     { name = "Alexander Blech", email = "alexander.blech@fu-berlin.de"},
 ]
+dependencies = [
+    "click",
+    "numpy",
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[project.scripts]
+pymolscat = "pymolscat.cli:main"
