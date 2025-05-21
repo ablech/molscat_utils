@@ -1,7 +1,8 @@
 import re
 from typing import TextIO, List, Dict
 import numpy as np
-from .molscat_output import ScatteringBlock
+import xarray as xr
+from .molscat_output import MolscatInputParameters, ScatteringBlock, MolscatResult
 
 
 # TODO: add sanity checks:
@@ -9,6 +10,8 @@ from .molscat_output import ScatteringBlock
 # - dimension of S matrix corresponds to number of open channels
 # - dimension of printed partial cross section matrix corresponds to number of pair levels in open channel list
 # - dimension of printed accumulated cross section matrix corresponds to number of pair states/levels
+# - dimension of printed total integrated cross section matrix corresponds to maximum number of pair levels of all partial cross sections,
+#   i.e., zero-entries are omitted
 
 INITIALIZATION_PATTERS = {
     'separator': re.compile(r'^s*'+59*r'=='), # see mol.driver.f90, format 1060
@@ -41,7 +44,12 @@ def parse_output(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     calc_data = parse_calculation(stream)
     summary_data = parse_summary(stream)
     #TODO: organize data into proper data structure
-    return init_data, calc_data, summary_data
+
+    #return init_data, calc_data, summary_data
+    MolscatResult = _process_result_data(
+        {'init': init_data, 'calc': calc_data, 'summary': summary_data}
+    )
+    return MolscatResult
 
 
 def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
@@ -118,21 +126,21 @@ def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]
                 raise ValueError(f"Problem reading energies from line\n{line}")
             else:
                 energies.append(float(match.group(1)))
-            continue
-        elif read_energies and len(energies) == num_energies:
-            data['energies'] = energies
+            if len(energies) == num_energies:
+                data['energies'] = energies
+                read_energies = False
             continue
 
         # Read number of J and symmetry blocks
-        match = re.search(r'TOTAL ANGULAR MOMENTUM JTOT RUNS FROM +(\d+) + TO (\d+) +IN STEPS OF +(\d+)', line)
+        match = re.search(r'TOTAL ANGULAR MOMENTUM JTOT RUNS FROM +(\d+) +TO +(\d+) +IN STEPS OF +(\d+)', line)
         if match:
             data['JTOTL'] = int(match.group(1))
             data['JTOTU'] = int(match.group(2))
             data['JSTEP'] = int(match.group(3))
             continue
-        match = re.search(r'EACH JTOT IS SPLIT INTO A MAXIMUM OF +(\d+) SYMMETRY BLOCKS', line)
+        match = re.search(r'EACH JTOT IS SPLIT INTO A MAXIMUM OF +(\d+) +SYMMETRY BLOCKS', line)
         if match:
-            data['num symmetries'] = int(match.group(1))
+            data['max symmetries'] = int(match.group(1))
             continue
 
     # Stream ended before initialization was complete
@@ -198,7 +206,7 @@ def _parse_j_block(lines: List[str], data: Dict[str, List[List[str]]]) -> Dict[s
 
     # From first line of block, extract J and symmetry
     match = CALCULATION_PATTERNS['block_start'].match(lines[0])
-    block_data['jtot'] = int(match.group(1))
+    block_data['Jtot'] = int(match.group(1))
     block_data['symmetry'] = int(match.group(2))
 
     # Split j block into energy blocks
@@ -356,7 +364,9 @@ def _parse_Eblock_s_matrix(lines, data):
         elif column_header:
             split = line.split()
             assert len(split) == len(column_header)
-            s_matrix['rows'].append([float(col) for col in split])
+            s_matrix['rows'].append(
+                [int(split[0]), int(split[1])] + [float(col) for col in split[2:]]
+            )
         else:
             raise ValueError("No S matrix found")
         #TODO: make sure, number of lines corresponds to number of open channels
@@ -389,7 +399,7 @@ def _parse_Eblock_integrated_cross_sections(lines, data):
     cs_data['jtot max'] = int(match.group(2))
 
     cs_data['data'] = _parse_cross_sections(lines)
-    data['pcs'] = cs_data
+    data['acs'] = cs_data
     return data
 
 
@@ -508,9 +518,9 @@ def _parse_summary_ics(lines: List[str], data: Dict[str, List[List[str]]]) -> Di
         _lines = block.strip().split('\n')
         for line in _lines:
             split = line.split()
-            f_idx.append(split[4])
-            i_idx.append(split[5])
-            sigma.append(split[6])
+            f_idx.append(int(split[4]))
+            i_idx.append(int(split[5]))
+            sigma.append(float(split[6]))
         ics.append([f_idx, i_idx, sigma])
     data['ics'] = ics
 
@@ -523,3 +533,164 @@ def _parse_summary_footer(lines: List[str], data: Dict[str, List[List[str]]]) ->
     words = int(re.search(r"\s+([\d,]+)\s+of the allocated", footer).group(1))
     data['memory'] = words * 8 / 1e6 # convert to MB
     return data
+
+
+def _process_result_data(data):
+
+    para = MolscatInputParameters(
+        IPRINT = data['init'].get('IPRINT'),
+        JTOTL = data['init'].get('JTOTL'),
+        JTOTU = data['init'].get('JTOTU'),
+        JSTEP = data['init'].get('JSTEP'),
+    )
+
+    result = MolscatResult(
+        para = para,
+        type = data['init'].get('interaction type'),
+        runtime = data['summary'].get('time'),
+        memory = data['summary'].get('memory'),
+        mu = data['init'].get('reduced mass'),
+        energies = data['init'].get('energies'),
+        pair_energies = None,
+        #pair_states = data['init'].get('pair_states'),
+        symmetries = data['init'].get('max symmetries'),
+        blocks = _process_blocks(data),
+        ics = _process_total_integrated_cross_sections(data),
+        acs = _process_accumulated_cross_sections(data),
+    )
+
+    return result
+
+
+def _process_total_integrated_cross_sections(data):
+    """
+    Read total integrated cross section from data dict and store as DataArray.
+    """
+    ics_data = data['summary'].get('ics')
+    if ics_data is None:
+        return None
+    else:
+        # All ics_data entries have the same structure: [f_idx, i_idx, sigma]
+        # We'll use the first entry to get the unique indices
+        f_indices = np.unique(np.concatenate([np.array(entry[0]) for entry in ics_data]))
+        i_indices = np.unique(np.concatenate([np.array(entry[1]) for entry in ics_data]))
+        energies = data['init'].get('energies')
+
+        # Prepare a 3D array: (energy, f, i)
+        cross_sections = np.zeros((len(ics_data), len(f_indices), len(i_indices)))
+
+        for e_idx, entry in enumerate(ics_data):
+            f_idx_arr = np.array(entry[0], dtype=int) - 1  # zero-based
+            i_idx_arr = np.array(entry[1], dtype=int) - 1
+            sigma_arr = np.array(entry[2], dtype=float)
+            cross_sections[e_idx, f_idx_arr, i_idx_arr] = sigma_arr
+
+        return xr.DataArray(
+            cross_sections,
+            dims=["E", "f", "i"],
+            coords={
+                "E": energies,
+                "f": f_indices,
+                "i": i_indices,
+            },
+            name="cross_section"
+        )
+
+
+def _process_accumulated_cross_sections(data):
+    acs_list = [[]]
+    for block_data in data['calc'].get('j_blocks', []):
+        for E_block in block_data.get('E_blocks', []):
+            acs_dict = E_block.get('acs')
+            if acs_dict is not None:
+                # Extract one cross section
+                acs_data = acs_dict.pop('data')
+                f_indices = acs_data['F']
+                i_indices = acs_data['I']
+                values = acs_data['values']
+                acs = xr.DataArray(
+                    values,
+                    dims=["f", "i"],
+                    coords={
+                        "f": f_indices,
+                        "i": i_indices,
+                    },
+                    name="partial cross_section"
+                )
+                acs.attrs = acs_dict
+
+                # Store cross section at correct place in acs_list
+                # Ensure acs_list has enough sublists for each energy
+                energy_idx = E_block.get('iE', 0) if 'iE' in E_block else 0
+                energy_idx = energy_idx - 1 # zero-indexing
+                while len(acs_list) <= energy_idx:
+                    acs_list.append([])
+                acs_list[energy_idx].append(acs)
+    return acs_list
+
+
+def _process_blocks(data):
+    blocks = []
+    for block_data in data['calc'].get('j_blocks', []):
+
+        # Extract data from energy sub-blocks
+        energies = []
+        n_channels = []
+        n_open = []
+        S = []
+        pcs = []
+        for E_block in block_data.get('E_blocks', []):
+            energies.append(E_block.get('energy'))
+            n_channels.append(len(E_block.get('channels', {}).get('rows', [])))
+            n_open.append(len(E_block.get('open channels', {}).get('rows', [])))
+            S.append(_process_S_matrix(E_block, n_open[-1]))
+            pcs.append(_process_partial_cross_sections(E_block, n_open[-1]))
+
+        # Fill J-block data structure
+        blocks.append(ScatteringBlock(
+            Jtot = block_data.get('Jtot'),
+            sym = block_data.get('symmetry'),
+            energies = energies,
+            n_channels = n_channels,
+            n_open = n_open,
+            S = S,
+            pcs = pcs,
+        ))
+    return blocks
+
+
+def _process_S_matrix(E_block, n_open):
+    S_dict = E_block.get('S')
+    if S_dict is not None:
+        S_array = np.asarray(S_dict['rows'], dtype=object)
+        S = np.zeros((n_open, n_open), dtype=complex)
+        for i in range(len(S_array)):
+            row, col, S_abs, S_ang, S_re, S_im = S_array[i]
+            S_val = S_re + 1j*S_im
+            assert np.allclose(S_abs, np.abs(S_val))
+            S[row-1, col-1] = S_val
+    else:
+        S = None
+    return S
+
+
+def _process_partial_cross_sections(E_block, n_open):
+    pcs_dict = E_block.get('pcs')
+    if pcs_dict is not None:
+        pcs_data = pcs_dict.pop('data')
+        f_indices = pcs_data['F']
+        i_indices = pcs_data['I']
+        values = pcs_data['values']
+        pcs = xr.DataArray(
+            values,
+            dims=["f", "i"],
+            coords={
+                "f": f_indices,
+                "i": i_indices,
+            },
+            name="partial cross_section"
+        )
+        pcs.attrs = pcs_dict
+    else:
+        pcs = None
+    return pcs
