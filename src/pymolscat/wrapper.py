@@ -56,8 +56,12 @@ class MolscatWrapper(object):
         """
         Read and parse the configuration file.
         """
-        with open(runfolder / filename, 'r') as f:
-            config_data = json.load(f)
+        try:
+            with open(runfolder / filename, 'r') as f:
+                config_data = json.load(f)
+        except:
+            self.config = {}
+            return
 
         MAX_LINE_LENGTH = 79
         indentation = ' ' * 13
@@ -91,16 +95,17 @@ class MolscatWrapper(object):
             # Read the template file
             template = f.read()
 
-        # Define the replacements dictionary
-        replacements = {
-            "$[NLEVEL]": str(self.config['nlevel']),
-            "$[JLEVEL]": str(self.config['jlevel']),
-            #"$[IREF]": str(self.config['iref']),
-        }
+        if len(self.config) > 0:
+            # Define the replacements dictionary
+            replacements = {
+                "$[NLEVEL]": str(self.config['nlevel']),
+                "$[JLEVEL]": str(self.config['jlevel']),
+                #"$[IREF]": str(self.config['iref']),
+            }
 
-        # Perform the replacements dynamically
-        for placeholder, value in replacements.items():
-            template = template.replace(placeholder, value)
+            # Perform the replacements dynamically
+            for placeholder, value in replacements.items():
+                template = template.replace(placeholder, value)
 
         with open(runfolder / 'inp.dat', 'w') as f:
             # Write the input data to the file
