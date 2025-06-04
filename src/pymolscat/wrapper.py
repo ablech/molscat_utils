@@ -1,3 +1,4 @@
+from importlib import metadata
 import json
 from pathlib import Path
 import subprocess
@@ -15,6 +16,20 @@ class MolscatWrapper(object):
         self.molscat = Path(molscat_bin)
         self.config = {}
 
+    def print_header(self, log):
+        """
+        Print information about MolscatWrapper and the MOLSCAT binary at the
+        beginning of the log file and to stdout.
+        """
+        version = metadata.version("pymolscat")
+        header = (
+            f"#   Running MolscatWrapper, version {version}\n"
+            f"#   Calling MOLSCAT binary: {self.molscat.name}\n"
+            f"#   from: {self.molscat.parent}\n\n"
+        )
+        log.write(header)
+        print(header)
+
     def run(self, runfolder: Path, log_file: str = 'out.dat'):
         """
         Run the molscat program.
@@ -29,6 +44,7 @@ class MolscatWrapper(object):
 
         command = [self.molscat]
         with open(runfolder / log_file, 'w') as log:
+            self.print_header(log)
             process = subprocess.Popen(
             command,
             shell=True,
