@@ -45,11 +45,15 @@ def parse_output(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     summary_data = parse_summary(stream)
     #TODO: organize data into proper data structure
 
-    #return init_data, calc_data, summary_data
-    MolscatResult = _process_result_data(
-        {'init': init_data, 'calc': calc_data, 'summary': summary_data}
-    )
-    return MolscatResult
+    try:
+        MolscatResult = _process_result_data(
+            {'init': init_data, 'calc': calc_data, 'summary': summary_data}
+        )
+        return MolscatResult
+    except:
+        print('Error in output processing.')
+        print('Returning dictionary instead')
+        return {'init': init_data, 'calc': calc_data, 'summary': summary_data}
 
 
 def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
@@ -511,18 +515,27 @@ def _parse_summary_ics(lines: List[str], data: Dict[str, List[List[str]]]) -> Di
 
     # Remaining blocks contain the integral cross sections for each collision energy
     ics = []
+    total_inelastic = []
     for block in blocks:
+        i_inel = []
+        sigma_inel = []
         f_idx = []
         i_idx = []
         sigma = []
         _lines = block.strip().split('\n')
         for line in _lines:
             split = line.split()
-            f_idx.append(int(split[4]))
-            i_idx.append(int(split[5]))
-            sigma.append(float(split[6]))
+            if len(split) == 7:
+                f_idx.append(int(split[4]))
+                i_idx.append(int(split[5]))
+                sigma.append(float(split[6]))
+            elif len(split) == 2:
+                sigma_inel.append(float(split[0]))
+                i_inel.append(int(split[1]))
         ics.append([f_idx, i_idx, sigma])
+        total_inelastic.append([i_inel, sigma_inel])
     data['ics'] = ics
+    data['total_inelastic'] = total_inelastic
 
     return data
 
@@ -665,9 +678,11 @@ def _process_S_matrix(E_block, n_open):
         S_array = np.asarray(S_dict['rows'], dtype=object)
         S = np.zeros((n_open, n_open), dtype=complex)
         for i in range(len(S_array)):
-            row, col, S_abs, S_ang, S_re, S_im = S_array[i]
+            row, col, S_sqr, S_ang, S_re, S_im = S_array[i]
             S_val = S_re + 1j*S_im
-            assert np.allclose(S_abs, np.abs(S_val))
+            assert np.allclose(S_sqr, np.abs(S_val)**2), (
+                f"{S_sqr} {np.abs(S_val)**2} {S_sqr-np.abs(S_val)**2}"
+            )
             S[row-1, col-1] = S_val
     else:
         S = None
