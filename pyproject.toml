@@ -1,6 +1,6 @@
 [project]
 name = "pymolscat"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Python package for wrapping MOLSCAT and processing its output"
 authors = [
     { name = "Alexander Blech", email = "alexander.blech@fu-berlin.de"},
@@ -12,8 +12,11 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+ [tool.hatch.version]
+ path = "src/pymolscat/__init__.py"
 
 [project.scripts]
 molscat = "pymolscat.cli:wrapper"
