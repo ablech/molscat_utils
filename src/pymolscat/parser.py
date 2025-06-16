@@ -14,27 +14,27 @@ from .molscat_output import MolscatInputParameters, ScatteringBlock, MolscatResu
 #   i.e., zero-entries are omitted
 
 INITIALIZATION_PATTERS = {
-    'separator': re.compile(r'^s*'+59*r'=='), # see mol.driver.f90, format 1060
+    'separator': re.compile(r'^s*'+59*r'==', flags=re.MULTILINE), # see mol.driver.f90, format 1060
 }
 
 CALCULATION_PATTERNS = {
-    'label_line': re.compile(r'^\s*=+\s(.*?)\s='), # see mol.driver.f90, format F710
-    'block_start': re.compile(r'^\s*\*+\s+ANGULAR MOMENTUM JTOT  =\s*(\d+)\s+AND SYMMETRY BLOCK  =\s*(\d+)'),
-    'energy_block_separator': re.compile(r'^\s*'+59*r'- '), # see mol.driver.f90, format 2801
+    'label_line': re.compile(r'^\s*=+\s(.*?)\s=', flags=re.MULTILINE), # see mol.driver.f90, format F710
+    'block_start': re.compile(r'^\s*\*+\s+ANGULAR MOMENTUM JTOT  =\s*(\d+)\s+AND SYMMETRY BLOCK  =\s*(\d+)', flags=re.MULTILINE),
+    'energy_block_separator': re.compile(r'^\s*'+58*r'- '+'-', flags=re.MULTILINE), # see mol.driver.f90, format 2801
 }
 
 ENERGY_BLOCK_SECTION_PATTERNS = {
     'channels': re.compile(r'CHANNEL FUNCTION LIST'),
-    'propagation': re.compile(r'^ *COUPLED EQUATIONS PROPAGATED AT *ENERGY'),
-    'open_channels': re.compile(r'^ *OPEN CHANNEL * WVEC'),
+    'propagation': re.compile(r'^ *COUPLED EQUATIONS PROPAGATED AT *ENERGY', flags=re.MULTILINE),
+    'open_channels': re.compile(r'^ *OPEN CHANNEL * WVEC', flags=re.MULTILINE),
     's_matrix': re.compile(r'^ *ROW +COL + S\*\*2'),
-    'pcs': re.compile(r'^ *\* \* \* \* \* \* \* \* \* \*  STATE-TO-STATE PARTIAL CROSS SECTIONS'),
-    'ics': re.compile(r'^ *\* \* \* \* \* \* \* \* \* \* STATE-TO-STATE INTEGRAL CROSS SECTIONS'),
+    'pcs': re.compile(r'^ *\* \* \* \* \* \* \* \* \* \*  STATE-TO-STATE PARTIAL CROSS SECTIONS', flags=re.MULTILINE),
+    'ics': re.compile(r'^ *\* \* \* \* \* \* \* \* \* \* STATE-TO-STATE INTEGRAL CROSS SECTIONS', flags=re.MULTILINE),
 }
 
 SUMMARY_SECTION_PATTERNS = {
-    'ics': re.compile(r'^\s*STATE-TO-STATE INTEGRAL CROSS SECTIONS IN ANGSTROM'),
-    'footer': re.compile(r'^\s*-'+5*r'--- MOLSCAT ---'), # see mol.driver.f90, format 1001
+    'ics': re.compile(r'^\s*STATE-TO-STATE INTEGRAL CROSS SECTIONS IN ANGSTROM', flags=re.MULTILINE),
+    'footer': re.compile(r'^\s*-'+5*r'--- MOLSCAT ---', flags=re.MULTILINE), # see mol.driver.f90, format 1001
 }
 
 
@@ -45,16 +45,23 @@ def parse_output(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     summary_data = parse_summary(stream)
     output_data = {'init': init_data, 'calc': calc_data, 'summary': summary_data}
 
-    try:
-        MolscatResult = _process_result_data(
-            output_data
-        )
-        return MolscatResult, output_data
-    except:
-        print('Error in output processing.')
-        print('Returning None instead')
-        return None, output_data
+    debug = False
 
+    if debug:
+        try:
+            MolscatResult = _process_result_data(
+                output_data
+            )
+            return MolscatResult, output_data
+        except:
+            print('Error in output processing.')
+            print('Returning None instead')
+            return None, output_data
+    else:
+        MolscatResult = _process_result_data(
+                output_data
+            )
+        return MolscatResult, output_data
 
 def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     data = {}
@@ -634,8 +641,8 @@ def _process_accumulated_cross_sections(data):
 
                 # Store cross section at correct place in acs_list
                 # Ensure acs_list has enough sublists for each energy
-                energy_idx = E_block.get('iE', 0) if 'iE' in E_block else 0
-                energy_idx = energy_idx - 1 # zero-indexing
+                energy = float(E_block.get('energy'))
+                energy_idx = np.argmin(abs(np.asarray(data['init']['energies']) - energy))
                 while len(acs_list) <= energy_idx:
                     acs_list.append([])
                 acs_list[energy_idx].append(acs)
