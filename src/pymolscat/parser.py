@@ -43,17 +43,17 @@ def parse_output(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     init_data = parse_initialization(stream)
     calc_data = parse_calculation(stream)
     summary_data = parse_summary(stream)
-    #TODO: organize data into proper data structure
+    output_data = {'init': init_data, 'calc': calc_data, 'summary': summary_data}
 
     try:
         MolscatResult = _process_result_data(
-            {'init': init_data, 'calc': calc_data, 'summary': summary_data}
+            output_data
         )
-        return MolscatResult
+        return MolscatResult, output_data
     except:
         print('Error in output processing.')
-        print('Returning dictionary instead')
-        return {'init': init_data, 'calc': calc_data, 'summary': summary_data}
+        print('Returning None instead')
+        return None, output_data
 
 
 def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
