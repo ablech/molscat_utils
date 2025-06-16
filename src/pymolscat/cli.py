@@ -15,7 +15,10 @@ from .wrapper import MolscatWrapper
 @click.option('--molscat-bin', envvar='MOLSCAT_BIN', type=click.Path(exists=True), default=None,
               help="Path to the Molscat executables. Defaults to the current directory or the MOLSCAT_BIN environment variable."
               )
-def main(system, runfolder, molscat_bin):
+@click.option('--quiet', type=bool, default=False,
+              help="Don't print Molscat output to stdout."
+              )
+def main(system, runfolder, molscat_bin, quiet):
     """Run MOLSCAT.
 
     \b
@@ -33,7 +36,7 @@ def main(system, runfolder, molscat_bin):
     executable = molscat_bin / f"molscat-{system}"
     assert executable.exists(), f"Molscat executable {executable} does not exist"
 
-    wrapper = MolscatWrapper(executable)
+    wrapper = MolscatWrapper(executable, quiet=quiet)
     wrapper.run(runfolder)
 
     return 0

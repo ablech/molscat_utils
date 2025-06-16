@@ -9,12 +9,13 @@ class MolscatWrapper(object):
     Wrapper for the Molscat program.
     """
 
-    def __init__(self, molscat_bin: str):
+    def __init__(self, molscat_bin: str, quiet=False):
         """
         Initialize the MolscatWrapper class.
         """
         self.molscat = Path(molscat_bin)
         self.config = {}
+        self.quiet = quiet
 
     def print_header(self, log):
         """
@@ -61,7 +62,8 @@ class MolscatWrapper(object):
             for line in process.stdout:
                 log.write(line)
                 log.flush()  # Ensure the log file is updated immediately
-                print(line, end='')  # Optionally print to the console
+                if not self.quiet:
+                    print(line, end='')  # Optionally print to the console
                 output.append(line)  # Collect the output
 
             process.wait()  # Wait for the process to complete
