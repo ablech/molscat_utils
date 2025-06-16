@@ -16,4 +16,5 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-pymolscat = "pymolscat.cli:main"
+molscat = "pymolscat.cli:wrapper"
+molscat-parser = "pymolscat.cli:parser"
