@@ -20,11 +20,11 @@ INITIALIZATION_PATTERS = {
 CALCULATION_PATTERNS = {
     'label_line': re.compile(r'^\s*=+\s(.*?)\s=', flags=re.MULTILINE), # see mol.driver.f90, format F710
     'block_start': re.compile(r'^\s*\*+\s+ANGULAR MOMENTUM JTOT  =\s*(\d+)\s+AND SYMMETRY BLOCK  =\s*(\d+)', flags=re.MULTILINE),
+    'channels': re.compile(r'CHANNEL FUNCTION LIST'),
     'energy_block_separator': re.compile(r'^\s*'+58*r'- '+'-', flags=re.MULTILINE), # see mol.driver.f90, format 2801
 }
 
 ENERGY_BLOCK_SECTION_PATTERNS = {
-    'channels': re.compile(r'CHANNEL FUNCTION LIST'),
     'propagation': re.compile(r'^ *COUPLED EQUATIONS PROPAGATED AT *ENERGY', flags=re.MULTILINE),
     'open_channels': re.compile(r'^ *OPEN CHANNEL * WVEC', flags=re.MULTILINE),
     's_matrix': re.compile(r'^ *ROW +COL + S\*\*2'),
@@ -220,6 +220,27 @@ def _parse_j_block(lines: List[str], data: Dict[str, List[List[str]]]) -> Dict[s
     block_data['Jtot'] = int(match.group(1))
     block_data['symmetry'] = int(match.group(2))
 
+    # From beginning of j block, extract the channels
+    channel_block = []
+    i_start = None
+    i_stop = None
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line: continue
+        if i_start is None and CALCULATION_PATTERNS['channels'].match(line):
+            # found channel list
+            i_start = i
+        if (
+            i_start is not None
+            and ENERGY_BLOCK_SECTION_PATTERNS['propagation'].match(line)
+        ): # end of channel list
+            i_stop = i - 1
+            break
+    if i_start is not None and i_stop is not None:
+        channel_block = lines[i_start:i_stop+1]
+    if channel_block:
+        block_data = _parse_jblock_channels(channel_block, block_data)
+
     # Split j block into energy blocks
     j_block = '\n'.join(lines)
     E_blocks = re.split(CALCULATION_PATTERNS['energy_block_separator'], j_block)
@@ -230,6 +251,42 @@ def _parse_j_block(lines: List[str], data: Dict[str, List[List[str]]]) -> Dict[s
     data['j_blocks'].append(block_data)
 
     return data # TODO: finalize data
+
+
+def _parse_jblock_channels(lines, data):
+    channels = {}
+    quantum_numbers = None
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        if quantum_numbers is None:
+            match = re.search(r'^\s*-+\s+(.+)\s+-+', line)
+            if match:
+                quantum_numbers = match.group(1).split()
+                column_header = (
+                    ['channel', 'pair state']
+                    + quantum_numbers
+                    + ['L', 'pair level', 'pair energy']
+                )
+                channels['column_header'] = column_header
+                channels['rows'] = []
+                continue
+        if quantum_numbers:
+            match = re.search(r'^ *REFERENCE ENERGY IS *(\d+\.?\d*) *(\S*) *= *(\d+\.?\d*) *(\S*)', line)
+            if match:
+                # End of channel list
+                channels['ref_energy'] = float(match.group(1))
+                channels['ref_energy_unit'] = match.group(2)
+                break
+            else:
+                # Row of channel list
+                split = line.split()
+                assert len(split) == len(column_header)
+                channels['rows'].append(
+                    [int(col) for col in split[:-1]] + [float(split[-1])]
+                )
+    data['channels'] = channels
+    return data
 
 
 def _parse_energy_block(block, data):
@@ -263,17 +320,15 @@ def _parse_energy_block(block, data):
     # flush last section
     flush()
 
-    if sections['propagation']:
+    if sections.get('propagation'):
         block_data = _parse_Eblock_propagation(sections['propagation'], block_data)
-    if sections['channels']:
-        block_data = _parse_Eblock_channels(sections['channels'], block_data)
-    if sections['open_channels']:
+    if sections.get('open_channels'):
         block_data = _parse_Eblock_open_channels(sections['open_channels'], block_data)
-    if sections['s_matrix']:
+    if sections.get('s_matrix'):
         block_data = _parse_Eblock_s_matrix(sections['s_matrix'], block_data)
-    if sections['pcs']:
+    if sections.get('pcs'):
         block_data = _parse_Eblock_partial_cross_sections(sections['pcs'], block_data)
-    if sections['ics']:
+    if sections.get('ics'):
         block_data = _parse_Eblock_integrated_cross_sections(sections['ics'], block_data)
 
     # TODO: make sure, parsing is robust against unknown sections
@@ -296,42 +351,6 @@ def _parse_Eblock_propagation(lines, data):
         data['abs_energy'] = float(match.group(1))
 
     #TODO: add fallback, if not found
-    return data
-
-
-def _parse_Eblock_channels(lines, data):
-    channels = {}
-    quantum_numbers = None
-    for line in lines:
-        line = line.strip()
-        if not line: continue
-        if quantum_numbers is None:
-            match = re.search(r'^\s*-+\s+(.+)\s+-+', line)
-            if match:
-                quantum_numbers = match.group(1).split()
-                column_header = (
-                    ['channel', 'pair state']
-                    + quantum_numbers
-                    + ['L', 'pair level', 'pair energy']
-                )
-                channels['column_header'] = column_header
-                channels['rows'] = []
-                continue
-        if quantum_numbers:
-            match = re.search(r'^ *REFERENCE ENERGY IS *(\d+\.?\d*) *(\S*) *= *(\d+\.?\d*) *(\S*)', line)
-            if match:
-                # End of channel list
-                channels['ref_energy'] = float(match.group(1))
-                channels['ref_energy_unit'] = match.group(2)
-                break
-            else:
-                # Row of channel list
-                split = line.split()
-                assert len(split) == len(column_header)
-                channels['rows'].append(
-                    [int(col) for col in split[:-1]] + [float(split[-1])]
-                )
-    data['channels'] = channels
     return data
 
 
@@ -499,9 +518,9 @@ def parse_summary(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     # flush last section
     flush()
 
-    if sections['ics']:
+    if sections.get('ics'):
         data = _parse_summary_ics(sections['ics'], data)
-    if sections['footer']:
+    if sections.get('footer'):
         data = _parse_summary_footer(sections['footer'], data)
 
     return data
@@ -653,15 +672,15 @@ def _process_blocks(data):
     blocks = []
     for block_data in data['calc'].get('j_blocks', []):
 
+        channels = block_data.get('channels', {}).get('rows', [])
+
         # Extract data from energy sub-blocks
         energies = []
-        n_channels = []
         n_open = []
         S = []
         pcs = []
         for E_block in block_data.get('E_blocks', []):
             energies.append(E_block.get('energy'))
-            n_channels.append(len(E_block.get('channels', {}).get('rows', [])))
             n_open.append(len(E_block.get('open channels', {}).get('rows', [])))
             S.append(_process_S_matrix(E_block, n_open[-1]))
             pcs.append(_process_partial_cross_sections(E_block, n_open[-1]))
@@ -671,7 +690,8 @@ def _process_blocks(data):
             Jtot = block_data.get('Jtot'),
             sym = block_data.get('symmetry'),
             energies = energies,
-            n_channels = n_channels,
+            channels = channels,
+            n_channels = len(channels),
             n_open = n_open,
             S = S,
             pcs = pcs,

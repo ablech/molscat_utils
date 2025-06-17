@@ -11,7 +11,7 @@ class ScatteringBlock:
     energies: List
     n_channels: List[int] # List of number of channels
     n_open: List[int] # List of number of open channels
-    #channels: List[List[Tuple[int, ...]]]     # e.g. [[(i,v1,v2,...), ...]]
+    channels: List[List]     # e.g. [[i,v1,v2,...,E], ...]
     #open_channels: List[List[Dict]]
     #open_idx: List[int] # indices of open channels from the channel list
     S: List[np.ndarray]                # shape (Nch, Nch), dtype=complex
