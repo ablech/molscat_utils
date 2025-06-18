@@ -63,13 +63,20 @@ def parse_output(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
             )
         return MolscatResult, output_data
 
+
 def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]]]:
     data = {}
     read_energies = False
+    read_pair_states = False
 
+    skip = 0
     for line in stream:
         line = line.strip()
         if not line: continue # skip empty lines
+
+        if skip > 0:
+            skip -= 1
+            continue
 
         if line.startswith('INITIALIZATION DONE'):
             # End of initialization: extrat time and memory usage and return.
@@ -110,9 +117,27 @@ def parse_initialization(stream: TextIO | List[str]) -> Dict[str, List[List[str]
             data['interaction type'] = match.group(1)
             continue
 
+        # Read pair levels
         match = re.search(r'EACH PAIR STATE IS LABELLED BY *(\d+) QUANTUM NUMBER', line)
         if match:
-            data['num_quantum_numbers'] = int(match.group(1))
+            num_quantum_numbers = int(match.group(1))
+            data['num_quantum_numbers'] = num_quantum_numbers
+            continue
+        if line.startswith('PAIR STATE     PAIR STATE QUANTUM NUMBERS    PAIR LEVEL'):
+            read_pair_states = True
+            pair_states = []
+            skip = 1 # skip header line
+            continue
+        if read_pair_states and INITIALIZATION_PATTERS['separator'].match(line):
+            read_pair_states = False
+            data['pair_states'] = pair_states
+            continue
+        elif read_pair_states:
+            split = line.split()
+            assert len(split) == 3 + num_quantum_numbers
+            pair_states.append(
+                [int(col) for col in split[:-1]] + [float(split[-1])]
+            )
             continue
 
         match = re.search(r'POTENTIAL RETURNED IN UNITS OF EPSIL *= * (\d+\.\d+) +CM-1', line)
@@ -590,8 +615,7 @@ def _process_result_data(data):
         memory = data['summary'].get('memory'),
         mu = data['init'].get('reduced mass'),
         energies = data['init'].get('energies'),
-        pair_energies = None,
-        #pair_states = data['init'].get('pair_states'),
+        _pair_state_list = data['init'].get('pair_states'),
         symmetries = data['init'].get('max symmetries'),
         blocks = _process_blocks(data),
         ics = _process_total_integrated_cross_sections(data),

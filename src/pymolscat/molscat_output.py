@@ -11,7 +11,7 @@ class ScatteringBlock:
     energies: List
     n_channels: List[int] # List of number of channels
     n_open: List[int] # List of number of open channels
-    channels: List[List]     # e.g. [[i,v1,v2,...,E], ...]
+    channels: List[List] # e.g. [[i,v1,v2,...,E], ...]
     #open_channels: List[List[Dict]]
     #open_idx: List[int] # indices of open channels from the channel list
     S: List[np.ndarray]                # shape (Nch, Nch), dtype=complex
@@ -25,8 +25,10 @@ class MolscatResult:
     type: str # interaction type as extracted from output
     mu: float # reduced mass
     energies: List # List of input energies
-    pair_energies: List # List of threshold energies
-    #quantum_numbers: List[str] # List of pair state quantum numbers
+    _pair_state_list: List[List] # List of pair state quantum numbers and energies
+    pair_energies: List = field(init=False) # List of pair state threshold energies
+    pair_states: np.ndarray = field(init=False) # Array of pair state quantum number and indices
+    #quantum_numbers: List[str] = field(init=False) # List of pair state quantum numbers
     Jtot: List[int] = field(init=False) # List of Jtot values
     symmetries: List[int] # List of symmetries
     blocks: List[ScatteringBlock]
@@ -40,6 +42,8 @@ class MolscatResult:
     def __post_init__(self):
         self.n_blocks = len(self.blocks)
         self.Jtot = np.arange(self.para.JTOTL, self.para.JTOTU+1, self.para.JSTEP)
+        self.pair_energies = [state[-1] for state in self._pair_state_list]
+        self.pair_states = np.array([state[:-1] for state in self._pair_state_list], dtype=int)
 
 
 @dataclass
