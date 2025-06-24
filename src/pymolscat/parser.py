@@ -505,7 +505,14 @@ def _parse_cross_sections(lines):
             f_idx = int(parts[0]) - 1  # zero-based index
             for c, val in enumerate(parts[1:]):
                 i_idx = col_indices[c] - 1  # zero-based index
-                cross_section[f_idx, i_idx] = float(val)
+                try:
+                    cross_section[f_idx, i_idx] = float(val)
+                except ValueError:
+                    # This might occur because a broken Fortran exponent,
+                    # e.g., 7.65245-104
+                    if re.match(r'[+-]\d{3}', val[-4:]):
+                        new_val = val[0:-4] + 'E' + val[-4:]
+                        cross_section[f_idx, i_idx] = float(new_val)
 
     data['values'] = cross_section
     data['I'] = [i+1 for i in range(max_i)]
