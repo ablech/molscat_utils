@@ -22,7 +22,7 @@ class MolscatWrapper(object):
         Print information about MolscatWrapper and the MOLSCAT binary at the
         beginning of the log file and to stdout.
         """
-        version = metadata.version("pymolscat")
+        version = metadata.version("molscat_utils")
         header = (
             f"#   Running MolscatWrapper, version {version}\n"
             f"#   Calling MOLSCAT binary: {self.molscat.name}\n"
