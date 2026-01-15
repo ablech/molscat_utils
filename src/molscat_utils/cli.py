@@ -76,5 +76,5 @@ def parser(file, write_json):
             json.dump(output_data, f, indent=4)
     else:
         with open(f"{file}.parsed.pkl", 'wb') as f:
-            pickle.dump(output_data, f)
+            pickle.dump(MolscatResult, f)
     return 0
